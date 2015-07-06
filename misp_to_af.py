@@ -211,7 +211,7 @@ def parse_arguments():
 
     parser.add_argument('--ssl',
                         action='store_true',
-                        help='Your authentication key to access the MISP server API')
+                        help='Use SSL for communication with MISP API')
 
     parser.add_argument('-o', '--output',
                         action='store',
