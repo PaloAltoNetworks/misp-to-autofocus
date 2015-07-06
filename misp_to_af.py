@@ -14,36 +14,39 @@ def find_event(args):
     event_json = None
 
     if args.format == 'online':
-        args.logger.debug("Downloading MISP event from %s" % args.server)
+        args.logger.info("Downloading MISP event from %s" % args.server)
 
         event = args.misp.get_event(args.event)
 
         if event.status_code == 403:
-            print "Your API key does not have th"
+            print "Your API key does not have permission to access the MISP API."
             exit(-1)
 
         event_json = event.json()["Event"]
 
     elif args.format == 'json':
-        args.logger.debug("Loading JSON MISP database from %s" % args.input_file)
+        args.logger.info("Loading JSON MISP event from %s" % args.input_file)
         with open(args.input_file, "r") as f:
             try:
-                misp_data = json.load(f)
-                event_json = misp_data["Event"]
+                event_json = json.load(f)["Event"]
             except Exception as e:
                 args.logger.error("Failed to load JSON file at: %s" % args.input_file)
                 exit(-1)
 
     elif args.format == 'xml':
-        args.logger.debug("Loading XML MISP database from %s" % args.input_file)
-        with open(args.xml_file, "r") as f:
+        args.logger.info("Loading XML MISP event from %s" % args.input_file)
+        with open(args.input_file, "r") as f:
             try:
-                misp_data = xmltodict.parse(f.read())["response"]
-                for event in misp_data["Event"]:
-                    if event["id"] == args.event:
-                        event_json = event
-                        break
+                # Must convert OrderedDict to dict
+                event_xml = dict(xmltodict.parse(f.read())["response"]["Event"])
+                temp = []
+                for key in event_xml["Attribute"]:
+                    temp.append(dict(key))
+                event_xml["Attribute"] = temp
+
+                event_json = event_xml
             except Exception as e:
+                print e.message
                 args.logger.error("Failed to load XML file at: %s" % args.input_file)
                 exit(-1)
 
@@ -59,7 +62,10 @@ def convert_misp_event(args, event):
     query = AFQuery("any")
 
     query.name = event["info"]
-    query.description = "Autofocus query generated from MISP event %s from %s" % (args.event, args.server)
+    if args.format == "online":
+        query.description = "Autofocus query generated from MISP event %s from %s" % (args.event, args.server)
+    else:
+        query.description = "Autofocus query generated from MISP event %s from %s" % (event["id"], event["org"])
 
     # Dictionary of unsupported information
     unsupported = {}
@@ -164,11 +170,10 @@ def convert_misp_event(args, event):
             else:
                 unsupported[at["category"]].add(at["type"])
 
-    print "Unsupported MISP Types:"
+    args.logger.info("  Unsupported MISP Types:")
     for key in unsupported.keys():
         if len(unsupported[key]) > 0:
-            print("%s: %s" % (key, ", ".join(list(unsupported[key]))))
-    print("")
+            args.logger.info("    %s:%s%s" % (key, " "*(24 - len(key)), ", ".join(list(unsupported[key]))))
 
     return query
 
@@ -222,8 +227,8 @@ def output_autofocus_query(args, query):
         print(query_str)
 
 
-def print_usage(message, parser):
-    print(message)
+def print_usage(message, args, parser):
+    args.logger.debug(message)
     parser.print_help()
     exit(-1)
 
@@ -231,13 +236,14 @@ def print_usage(message, parser):
 def main():
     parser = parse_arguments()
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
     args.logger = logging.getLogger("MISP")
 
     # Set up the PyMISP object
     if args.format == "online":
 
         if (not args.server) or (not args.auth):
-            print_usage("To download from a MISP server, you must provide a server and API key", parser)
+            print_usage("To download from a MISP server, you must provide a server and API key", args, parser)
 
         if not (args.server.startswith("http://") or args.server.startswith("https://")):
             args.server = "https://%s" % args.server
@@ -246,7 +252,7 @@ def main():
         args.misp = PyMISP(args.server, args.auth, ssl=args.ssl)
 
     elif (args.format in ["csv", "xml", "json"]) and (not args.input_file):
-        print_usage("You must provide a path to a file to import the %s MISP database from" % args.format.upper(), parser)
+        print_usage("You must provide a path to a file to import the %s MISP database from" % args.format.upper(), args, parser)
 
     else:
         args.misp = None
