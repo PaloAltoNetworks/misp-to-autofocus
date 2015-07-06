@@ -7,39 +7,35 @@ import argparse
 import xmltodict
 import unicodedata
 
-from autofocus import AFCondition, AFQuery
+from autofocus import AFQuery
 
 
 def find_event(args):
     event_json = None
 
-    if args.download:
+    if args.format == 'online':
         args.logger.debug("Downloading MISP event from %s" % args.server)
-        #db = download_database(args)
 
         event = args.misp.get_event(args.event)
 
         if event.status_code == 403:
-            print "MISP server not configured for API use."
+            print "Your API key does not have th"
             exit(-1)
 
         event_json = event.json()["Event"]
 
-    elif args.json_file:
-        args.logger.debug("Loading JSON MISP database from %s" % args.json_file)
-        with open(args.json_file, "r") as f:
+    elif args.format == 'json':
+        args.logger.debug("Loading JSON MISP database from %s" % args.input_file)
+        with open(args.input_file, "r") as f:
             try:
                 misp_data = json.load(f)
-                for event in misp_data["Event"]:
-                    if event["id"] == args.event:
-                        event_json = event
-                        break
+                event_json = misp_data["Event"]
             except Exception as e:
-                args.logger.error("Failed to load JSON file at: %s" % args.json_file)
+                args.logger.error("Failed to load JSON file at: %s" % args.input_file)
                 exit(-1)
 
-    elif args.xml_file:
-        args.logger.debug("Loading XML MISP database from %s" % args.xml_file)
+    elif args.format == 'xml':
+        args.logger.debug("Loading XML MISP database from %s" % args.input_file)
         with open(args.xml_file, "r") as f:
             try:
                 misp_data = xmltodict.parse(f.read())["response"]
@@ -48,10 +44,10 @@ def find_event(args):
                         event_json = event
                         break
             except Exception as e:
-                args.logger.error("Failed to load XML file at: %s" % args.xml_file)
+                args.logger.error("Failed to load XML file at: %s" % args.input_file)
                 exit(-1)
 
-    elif args.csv_file:
+    elif args.format == 'csv':
         args.logger.error("CSV file importing not implemented yet!")
         exit(-1)
 
@@ -180,26 +176,20 @@ def convert_misp_event(args, event):
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-d', '--download',
-                        action='store_true',
-                        help='Get the event from an online MISP server')
-
-    parser.add_argument('-x', '--xml_file',
+    parser.add_argument('-f', '--format',
                         action='store',
-                        help='Path to a MISP XML database')
+                        required='true',
+                        choices=['online', 'csv', 'json', 'xml'],
+                        default='online',
+                        help='The format of the MISP database (online | csv | json | xml)')
 
-    parser.add_argument('-c', '--csv_file',
+    parser.add_argument('-i', '--input_file',
                         action='store',
-                        help='Path to a MISP CSV database')
-
-    parser.add_argument('-j', '--json_file',
-                        action='store',
-                        help='Path to a MISP JSON database')
+                        help='Path to a MISP database (xml, csv, or json)')
 
     parser.add_argument('-e', '--event',
                         action='store',
-                        help='The event ID of the event to create a query from',
-                        required='true')
+                        help='The event ID of the event to create a query from')
 
     parser.add_argument('-s', '--server',
                         action='store',
@@ -232,18 +222,31 @@ def output_autofocus_query(args, query):
         print(query_str)
 
 
+def print_usage(message, parser):
+    print(message)
+    parser.print_help()
+    exit(-1)
+
+
 def main():
     parser = parse_arguments()
     args = parser.parse_args()
     args.logger = logging.getLogger("MISP")
 
     # Set up the PyMISP object
-    if args.download:
+    if args.format == "online":
+
         if (not args.server) or (not args.auth):
-            print "To download from a MISP server, you must provide a server and API key"
-            parser.print_help()
-            exit(-1)
+            print_usage("To download from a MISP server, you must provide a server and API key", parser)
+
+        if not (args.server.startswith("http://") or args.server.startswith("https://")):
+            args.server = "https://%s" % args.server
+
+        # Create the MISP api class
         args.misp = PyMISP(args.server, args.auth, ssl=args.ssl)
+
+    elif (args.format in ["csv", "xml", "json"]) and (not args.input_file):
+        print_usage("You must provide a path to a file to import the %s MISP database from" % args.format.upper(), parser)
 
     else:
         args.misp = None
