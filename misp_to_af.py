@@ -209,6 +209,10 @@ def parse_arguments():
                         action='store',
                         help='Your authentication key to access the MISP server API')
 
+    parser.add_argument('--ssl',
+                        action='store_true',
+                        help='Your authentication key to access the MISP server API')
+
     parser.add_argument('-o', '--output',
                         action='store',
                         help='The file you would like to save your searches into')
@@ -239,7 +243,7 @@ def main():
             print "To download from a MISP server, you must provide a server and API key"
             parser.print_help()
             exit(-1)
-        args.misp = PyMISP(args.server, args.auth)
+        args.misp = PyMISP(args.server, args.auth, ssl=args.ssl)
 
     else:
         args.misp = None
