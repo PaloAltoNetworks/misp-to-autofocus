@@ -7,7 +7,7 @@ import argparse
 import xmltodict
 import unicodedata
 
-from autofocus import AFQuery
+from autofocus import AFCondition, AFQuery
 
 
 def find_event(args):
@@ -57,7 +57,20 @@ def find_event(args):
     return event_json
 
 
-def convert_misp_event(args, event):
+def create_conditions(args, event):
+    conditions = {"ip": [],
+                  "domain": [],
+                  "hostname": [],
+                  "url": [],
+                  "user-agent": [],
+                  "mutex": [],
+                  "md5": [],
+                  "sha1": [],
+                  "sha256": [],
+                  "file_path": [],
+                  "process": [],
+                  "registry": []}
+
     # Create a new AFQuery for this event
     query = AFQuery("any")
 
@@ -81,31 +94,35 @@ def convert_misp_event(args, event):
 
             if at["category"] == "Network activity":
                 if at["type"] == "domain":
-                    query.add_condition("sample.tasks.dns", "contains", at["value"])
+                    conditions["domain"].append(AFCondition("sample.tasks.dns", "contains", at["value"]))
                 elif at["type"] == "user-agent":
-                    query.add_condition("alias.user_agent", "contains", at["value"])
+                    conditions["user-agent"].append(AFCondition("alias.user_agent", "contains", at["value"]))
                 elif at["type"] == "hostname":
-                    query.add_condition("alias.domain", "contains", at["value"])
+                    conditions["domain"].append(AFCondition("alias.domain", "contains", at["value"]))
                 elif at["type"] == "ip-dst":
-                    query.add_condition("alias.ip_address", "is", at["value"])
+                    if not args.no_ip:
+                        conditions["ip"].append(AFCondition("alias.ip_address", "is", at["value"]))
                 elif at["type"] == "url":
-                    query.add_condition("alias.url", "contains", at["value"])
+                    conditions["url"].append(AFCondition("alias.url", "contains", at["value"]))
                 else:
                     unsupported[at["category"]].add(at["type"])
 
             elif at["category"] == "Artifacts dropped":
                 if at["type"] == "filename":
-                    query.add_condition("alias.filename", "contains", at["value"])
+                    conditions["file_path"].append(AFCondition("alias.filename", "contains", at["value"]))
                 elif at["type"] == "mutex":
-                    query.add_condition("sample.tasks.mutex", "contains", at["value"])
-                elif at["type"] == "md5":
-                    query.add_condition("sample.md5", "is", at["value"])
-                elif at["type"] == "sha1":
-                    query.add_condition("sample.sha1", "is", at["value"])
-                elif at["type"] == "sha256":
-                    query.add_condition("sample.sha256", "is", at["value"])
+                    conditions["mutex"].append(AFCondition("sample.tasks.mutex", "contains", at["value"]))
+
                 elif at["type"] in ["regkey", "regkey|value"]:
-                    query.add_condition("sample.tasks.registry", "contains", at["value"])
+                    conditions["registry"].append(AFCondition("sample.tasks.registry", "contains", at["value"]))
+
+                # For hashes we just make a list
+                elif at["type"] == "md5":
+                    conditions["md5"].append(at["value"])
+                elif at["type"] == "sha1":
+                    conditions["sha1"].append(at["value"])
+                elif at["type"] == "sha256":
+                    conditions["sha256"].append(at["value"])
 
                 else:
                     unsupported[at["category"]].add(at["type"])
@@ -118,9 +135,9 @@ def convert_misp_event(args, event):
 
             elif at["category"] == "Payload delivery":
                 if at["type"] == "url":
-                    query.add_condition("alias.url", "contains", at["value"])
+                    conditions["url"].append(AFCondition("alias.url", "contains", at["value"]))
                 elif at["type"] == "md5":
-                    query.add_condition("alias.hash", "contains", at["value"])
+                    conditions["md5"].append(at["value"])
                 else:
                     unsupported[at["category"]].add(at["type"])
 
@@ -170,12 +187,64 @@ def convert_misp_event(args, event):
             else:
                 unsupported[at["category"]].add(at["type"])
 
+    args.logger.info("")
+    args.logger.info("  Condition Type Counts:")
+    for key in sorted(conditions.keys()):
+        args.logger.info("    %s - %d" % (key, len(conditions[key])))
+
+    # Handle tokenized conditions that will be searched against a list
+    if len(conditions["md5"]) > 0:
+        conditions["md5"] = [AFCondition("sample.md5", "is in the list", conditions["md5"])]
+    if len(conditions["sha1"]) > 0:
+        conditions["sha1"] = [AFCondition("sample.sha1", "is in the list", conditions["sha1"])]
+    if len(conditions["sha256"]) > 0:
+        conditions["sha256"] = [AFCondition("sample.sha256", "is in the list", conditions["sha256"])]
+
+    args.logger.info("")
     args.logger.info("  Unsupported MISP Types:")
     for key in unsupported.keys():
         if len(unsupported[key]) > 0:
             args.logger.info("    %s:%s%s" % (key, " "*(24 - len(key)), ", ".join(list(unsupported[key]))))
 
+    return conditions
+
+
+def create_query(args, event):
+    # Create a new AFQuery for this event
+    query = AFQuery("any")
+
+    query.name = event["info"]
+    if args.format == "online":
+        query.description = "Autofocus query generated from MISP event %s from %s" % (args.event, args.server)
+    else:
+        query.description = "Autofocus query generated from MISP event %s from %s" % (event["id"], event["org"])
+
     return query
+
+
+def create_queries(args, event, conditions):
+    queries = []
+
+    current_query = create_query(args, event)
+
+    for key in conditions.keys():
+        if args.split:
+            if len(current_query.children) > 0:
+                queries.append(current_query)
+            current_query = create_query(args, event)
+
+        for condition in conditions[key]:
+            current_query.add_condition(condition)
+
+            if args.max_query:
+                if len(current_query.children) >= int(args.max_query):
+                    queries.append(current_query)
+                    current_query = create_query(args, event)
+
+    if len(current_query.children) > 0:
+        queries.append(current_query)
+
+    return queries
 
 
 def parse_arguments():
@@ -211,6 +280,18 @@ def parse_arguments():
     parser.add_argument('-o', '--output',
                         action='store',
                         help='The file you would like to save your searches into')
+
+    parser.add_argument('-m', '--max_query',
+                        action='store',
+                        help='The maximum number of items you would like in a query')
+
+    parser.add_argument('-sp', '--split',
+                        action='store_true',
+                        help='Split the queries into their sub types (e.g. ip, domain, file, etc.)')
+
+    parser.add_argument('-ni', '--no_ip',
+                        action='store_true',
+                        help='Use this argument if you don\'t want IP addresses included')
 
     return parser
 
@@ -259,9 +340,12 @@ def main():
 
     event_json = find_event(args)
 
-    query = convert_misp_event(args, event_json)
+    conditions = create_conditions(args, event_json)
 
-    output_autofocus_query(args, query)
+    queries = create_queries(args, event_json, conditions)
+
+    for query in queries:
+        output_autofocus_query(args, query)
 
 
 if __name__ == "__main__":
