@@ -96,20 +96,20 @@ def create_conditions(args, event):
                 if at["type"] == "domain":
                     conditions["domain"].append(AFCondition("sample.tasks.dns", "contains", at["value"]))
                 elif at["type"] == "user-agent":
-                    conditions["user-agent"].append(AFCondition("alias.user_agent", "contains", at["value"]))
+                    conditions["user-agent"].append(AFCondition("sample.tasks.user_agent", "contains", at["value"]))
                 elif at["type"] == "hostname":
-                    conditions["domain"].append(AFCondition("alias.domain", "contains", at["value"]))
+                    conditions["domain"].append(AFCondition("sample.tasks.dns", "contains", at["value"]))
                 elif at["type"] == "ip-dst":
                     if not args.no_ip:
-                        conditions["ip"].append(AFCondition("alias.ip_address", "is", at["value"]))
+                        conditions["ip"].append(AFCondition("sample.tasks.connection", "contains", at["value"]))
                 elif at["type"] == "url":
-                    conditions["url"].append(AFCondition("alias.url", "contains", at["value"]))
+                    conditions["url"].append(AFCondition("sample.tasks.connection", "contains", at["value"]))
                 else:
                     unsupported[at["category"]].add(at["type"])
 
             elif at["category"] == "Artifacts dropped":
                 if at["type"] == "filename":
-                    conditions["file_path"].append(AFCondition("alias.filename", "contains", at["value"]))
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", at["value"]))
                 elif at["type"] == "mutex":
                     conditions["mutex"].append(AFCondition("sample.tasks.mutex", "contains", at["value"]))
 
@@ -134,10 +134,50 @@ def create_conditions(args, event):
                     unsupported[at["category"]].add(at["type"])
 
             elif at["category"] == "Payload delivery":
-                if at["type"] == "url":
-                    conditions["url"].append(AFCondition("alias.url", "contains", at["value"]))
+                if at["type"] == "filename":
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", at["value"]))
+                elif at["type"] == "url":
+                    conditions["url"].append(AFCondition("sample.tasks.connection", "contains", at["value"]))
                 elif at["type"] == "md5":
                     conditions["md5"].append(at["value"])
+                elif at["type"] == "sha1":
+                    conditions["sha1"].append(at["value"])
+                elif at["type"] == "sha256":
+                    conditions["sha256"].append(at["value"])
+                elif at["type"] == "filename|md5":
+                    [fn, md5] = at["value"].split("|")
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", fn.strip()))
+                    conditions["md5"].append(md5.strip())
+                elif at["type"] == "filename|sha1":
+                    [fn, sha1] = at["value"].split("|")
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", fn.strip()))
+                    conditions["sha1"].append(sha1.strip())
+                elif at["type"] == "filename|sha256":
+                    [fn, sha256] = at["value"].split("|")
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", fn.strip()))
+                    conditions["sha256"].append(sha256.strip())
+                else:
+                    unsupported[at["category"]].add(at["type"])
+
+            elif at["category"] == "Payload installation":
+                if at["type"] == "md5":
+                    conditions["md5"].append(at["value"])
+                elif at["type"] == "sha1":
+                    conditions["sha1"].append(at["value"])
+                elif at["type"] == "sha256":
+                    conditions["sha256"].append(at["value"])
+                elif at["type"] == "filename|md5":
+                    [fn, md5] = at["value"].split("|")
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", fn.strip()))
+                    conditions["md5"].append(md5.strip())
+                elif at["type"] == "filename|sha1":
+                    [fn, sha1] = at["value"].split("|")
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", fn.strip()))
+                    conditions["sha1"].append(sha1.strip())
+                elif at["type"] == "filename|sha256":
+                    [fn, sha256] = at["value"].split("|")
+                    conditions["file_path"].append(AFCondition("sample.tasks.file", "contains", fn.strip()))
+                    conditions["sha256"].append(sha256.strip())
                 else:
                     unsupported[at["category"]].add(at["type"])
 
@@ -152,26 +192,25 @@ def create_conditions(args, event):
                     pass
                 else:
                     unsupported[at["category"]].add(at["type"])
+
             elif at["category"] == "Other":
                 if at["type"] == "":
                     pass
                 else:
                     unsupported[at["category"]].add(at["type"])
+
             elif at["category"] == "Persistence mechanism":
                 if at["type"] == "":
                     pass
                 else:
                     unsupported[at["category"]].add(at["type"])
+
             elif at["category"] == "External analysis":
                 if at["type"] == "":
                     pass
                 else:
                     unsupported[at["category"]].add(at["type"])
-            elif at["category"] == "Payload installation":
-                if at["type"] == "":
-                    pass
-                else:
-                    unsupported[at["category"]].add(at["type"])
+
             elif at["category"] == "Antivirus detection":
                 if at["type"] == "":
                     pass
